@@ -1,0 +1,243 @@
+---
+title: "Statistical analysis"
+output: html_notebook
+---
+
+Data analysis and models.
+
+Packages
+```{r}
+library(lme4)
+library(tidyverse)
+library(circular)
+library(lubridate)
+library(lmerTest)
+library(MASS)
+```
+
+Data
+
+```{r}
+#Used for most analyses
+awacalda<-read_csv("awacwaves.csv")
+southanalysis<-read_csv("nusentanalysis.csv")
+sentstreym<-read_csv("sentvfivemins.csv")
+sentsmall<-sentstreym[c(1,5,11,32,33)]
+
+sentshort<-sentsmall %>% 
+  mutate(thirtymin=round_date(fivemin, "30 minutes")) %>% 
+  group_by(thirtymin) %>% 
+  summarise(meanmag=mean(meanmag),meandir=mean(circular(meandir,units="degrees"))%%360, mag4=mean(mag4),dir4=mean(circular(dir4,units="degrees"))%%360)
+
+
+# For measuring swimming effort
+effort<-read_csv2("effort.csv")
+effort$datetime<-as.POSIXct(effort$datetime, format = "%d.%m.%Y %H:%M")
+effort$date<-as.Date(effort$datetime)
+effort$camera<-factor(effort$camera)
+effort$swimtype<-factor(effort$swimtype)
+effort$against<-factor(effort$against)
+effort<-effort[-7]
+
+effortsent<-effort %>% 
+  mutate(thirtymin=floor_date(datetime, "30 minutes")) %>% 
+  left_join(sentshort, by=c("thirtymin"="thirtymin")) %>% 
+  left_join(southanalysis, by=c("datetime"="datetime"))%>% 
+  mutate(hourly=floor_date(thirtymin, "hour")) %>% 
+  left_join(awacalda, by=c("hourly"="hourly"))%>% 
+  mutate(direction=ifelse(meandir<250 & meandir>70,"Southbound","Northbound")) %>% 
+  mutate(direction2=ifelse(dirmean<250 & dirmean>70,"Southbound","Northbound")) %>% 
+  mutate(height=cut(Hm0,breaks=c(-Inf,1.2,Inf),labels=c("Small","Large"))) %>% 
+  mutate(length=cut(Tp, breaks=c(-Inf,12,Inf),labels=c("Short","Long"))) %>% 
+  mutate(streym=cut(speedmean, breaks=c(-Inf,0.1,0.2,Inf),labels=c("Weak","Medium","Strong"))) %>% 
+  mutate(tbps=3/effort)
+
+levels(effortsent$against)<-c("Against current","Free swimming")
+
+
+# For other video observations
+behaviours2<-read_csv2("behaviours2.csv")
+behaviours2$datetime<-as.POSIXct(paste(behaviours$date,behaviours$time), format="%d.%m.%Y %H:%M:%S")
+behaviours2<-behaviours2 %>% 
+  mutate(thirtymin=round_date(datetime, "30 minutes"))
+
+behavioursent<-behaviours2 %>% 
+  left_join(sentshort, by=c("thirtymin"="thirtymin"))
+
+behavioursent<-behavioursent %>% 
+  mutate(datetime=round_date(datetime,"5 minutes")) %>% 
+  left_join(southanalysis, by=c("datetime"="datetime"))
+
+behavioursent<-behavioursent %>% 
+  mutate(hourly=round_date(thirtymin, "hour")) %>% 
+  left_join(awacalda, by=c("hourly"="hourly"))
+
+behavioursent<-behavioursent %>% 
+  mutate(nonsome=none+some) %>% 
+  mutate(somemany=some+many) %>% 
+  mutate(manyshoal=many+shoal) %>% 
+  mutate(any=somemany+shoal) %>% 
+  mutate(direction=ifelse(meandir<250 & meandir>70,"Southbound","Northbound")) %>% 
+  mutate(direction2=ifelse(dirmean<250 & dirmean>70,"Southbound","Northbound")) %>% 
+  mutate(height=cut(Hm0,breaks=c(-Inf,1.2,Inf),labels=c("Small","Large"))) %>% 
+  mutate(length=cut(Tp, breaks=c(-Inf,12,Inf),labels=c("Short","Long"))) %>% 
+  mutate(streym=cut(speedmean, breaks=c(-Inf,0.1,0.2,Inf),labels=c("Weak","Medium","Strong"))) %>% 
+  mutate(biagainst=ifelse(against/(301-none)>0.5,1,0)) %>% 
+  mutate(bimany=ifelse(manyshoal>150,1,0)) %>% 
+  mutate(wave=Hm0*Tp)
+
+#For collisions
+
+collisiondat<-behavioursent %>% 
+  mutate(netvis=ifelse(collision>0, "ja", netvis)) %>% #some net visibility wrongly coded as "no".
+  filter(netvis=="ja") %>% 
+  filter(none < 300) 
+ 
+collisiondat<-collisiondat %>% 
+ mutate(nucols=collision/any) #Collisions per seconds of fish visible
+
+collisiondat$nucols<-round(collisiondat$nucols,2)*300 #extrapolated to 300 seconds of visible fish and rounded for purposes of poisson analysis
+
+#For echo data
+
+ekkoS<-read_csv("T1clean.csv")
+ekkoN<-read_csv("T2clean.csv")
+
+NEsouth<-ekkoN %>% 
+  left_join(southanalysis, by=c("tenmin"="datetime")) %>% 
+  left_join(sentsmall, by=c("tenmin"="fivemin")) %>% 
+  mutate(direction=factor(ifelse(meandir<250 & meandir>70, "Southbound","Northbound"))) %>% 
+  mutate(direction2=ifelse(dirmean<250 & dirmean>70,"Southbound","Northbound")) %>% 
+   filter(hourly<"2020-02-15") %>% 
+  mutate(streym=cut(meanmag, breaks=c(-Inf,0.12,0.22,Inf),labels=c("Weak","Medium","Strong"))) %>% 
+  mutate(hourfac=factor(hour)) %>% 
+  mutate(daynight=factor(ifelse(hour<15 & hour>8, "Day","Night"))) %>% 
+  mutate(posv=Sv+120)
+
+SEsouth<-ekkoS %>% 
+  left_join(southanalysis, by=c("tenmin"="datetime")) %>% 
+  left_join(sentsmall, by=c("tenmin"="fivemin")) %>% 
+  mutate(direction=factor(ifelse(meandir<250 & meandir>70, "Southbound","Northbound"))) %>% 
+  mutate(direction2=ifelse(dirmean<250 & dirmean>70,"Southbound","Northbound")) %>% 
+   filter(hourly<"2020-02-15") %>% 
+  mutate(streym=cut(meanmag, breaks=c(-Inf,0.12,0.22,Inf),labels=c("Weak","Medium","Strong"))) %>% 
+  mutate(hourfac=factor(hour)) %>% 
+  mutate(daynight=factor(ifelse(hour<15 & hour>8, "Day","Night"))) %>% 
+  mutate(posv=Sv+120)
+
+ekkowsouth<-SEsouth %>% 
+  left_join(awacalda, by=c("hourly"="hourly")) %>% 
+  mutate(height=cut(Hm0,breaks=c(-Inf,1,Inf),labels=c("Small","Large"))) %>% 
+  mutate(length=cut(Tp, breaks=c(-Inf,12,Inf),labels=c("Short","Long"))) %>% 
+  mutate(streym=cut(meanmag,breaks=c(-Inf,0.12,0.16,Inf),labels=c("Weak","Medium","Strong")))
+ekkownorth<-NEsouth %>% 
+  left_join(awacalda, by=c("hourly"="hourly")) %>% 
+  mutate(height=cut(Hm0,breaks=c(-Inf,1,Inf),labels=c("Small","Large"))) %>% 
+  mutate(length=cut(Tp, breaks=c(-Inf,12,Inf),labels=c("Short","Long"))) %>% 
+  mutate(streym=cut(meanmag,breaks=c(-Inf,0.16,Inf),labels=c("Weak","Strong")))
+
+
+
+```
+Video observation data:
+
+Swimming mode
+
+```{r}
+againstmod<-glmer(biagainst~direction2+speedmean+(1|camera),family=binomial,data=subset(behavioursent, none<300))
+summary(againstmod)
+
+```
+
+Effort in relation to mode
+
+```{r}
+modemod<-lm(tbps~against, data=effortsent)
+summary(modemod)
+```
+
+Effort in relation to waves and current
+
+```{r}
+effortmod<-lmer(tbps~speedmean:Tp+speedmean:direction2+speedmean+direction2+Tp+(1|against),data=effortsent)
+summary(effortmod)
+```
+
+
+"Many" fish by camera
+
+```{r}
+cameramany<-lm(many~camera, data=behavioursent)
+summary(cameramany)
+```
+
+"Many" fish by wave parameters
+
+```{r}
+manymodel<-lm(many~Hm0*Tp, data=behavioursent)
+summary(manymodel)
+anova(manymodel,test="F")
+```
+
+"Any" fish seen over camera and wave height
+
+```{r}
+anymodel<-lm(any~Hm0*camera, data=behavioursent)
+summary(anymodel)
+```
+
+Collisions
+
+```{r}
+colmodel<-glm(nucols~Hm0*speedmean, faimly=poisson, data=collisiondat)
+summary(colmodel)
+
+```
+
+Echo sounder analysis
+
+Back scatter strength
+```{r}
+southmodfull<-lm(Sv~meanmag*direction,data=SEsouth)
+summary(southmodfull)
+
+northmodfull<-lm(Sv~meanmag*direction,data=NEsouth)
+summary(northmodfull)
+
+```
+
+Residual analysis
+
+```{r}
+southresfull<-residuals(southmodfull)
+southresmodfull<-lm(abs(southresfull)~SEsouth$meanmag*SEsouth$direction)
+summary(southresmodfull)
+
+northresfull<-residuals(northmodfull)
+northresmodfull<-lm(abs(northresfull)~NEsouth$meanmag*NEsouth$direction)
+summary(northresmodfull)
+
+```
+
+Depth analysis in relation to current
+
+```{r}
+southdepth<-lm(depth~meanmag*direction, weights=posv, data=subset(SEsouth, Sv>-90))
+summary(southdepth)
+
+northdpeth<-lm(depth~meanmag*direction, weights=posv, data=subset(NEsouth, Sv>-90))
+summary(northdepth)
+
+```
+
+Depth in relation to waves
+
+```{r}
+
+southwave<-lm(depth~Hm0*direction+daynight, weights=posv, data=subset(ekkowsouth, Sv>-90))
+summary(southwave)
+
+northwave<-lm(depth~Hm0+direction+daynight, weights=posv, data=subset(ekkownorth, Sv>-90))
+summary(northwave)
+```
+
