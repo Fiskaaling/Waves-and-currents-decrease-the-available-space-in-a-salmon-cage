@@ -27,18 +27,24 @@ class Window(Frame):
         exit()
 
 
-def find_max(data, under):
+def find_max(data, under, upperlimit=1):
+    print("upperlimit is :" + str(upperlimit))
+    print("under is: " + str(under))
     maxi = []
     for i in range(len(data.iloc[1, :])):
         this_row = data.iloc[:, i]
         max_c = -1000
-        max_ci = -1000
-        for j, col in enumerate(this_row):
-            if (j > under) and not under == 0:
-                continue
-            if col > max_c:
-                max_c = col
+        max_ci = -1
+        for j in range(int(upperlimit), int(under)):
+            if this_row.iloc[int(j)] > max_c:
+                max_c = this_row.iloc[int(j)]
                 max_ci = j
+        # for j, col in enumerate(this_row):
+        #     if (upperlimit > j > under) and (not under == 0):
+        #         continue
+        #     if col > max_c:
+        #         max_c = col
+        #         max_ci = j
         maxi.append(max_ci)
     return maxi
 
@@ -91,7 +97,7 @@ def find_next_large_diff(data, limit=100):
     return -1
 
 
-def choose_file():
+def choose_file(d):
     global filename
     global dataign
     filename = filedialog.askopenfile(title='Choose file', filetypes=(("csv file", "*.csv"), ("all files", "*.*"))).name
@@ -117,8 +123,13 @@ def choose_file():
     global yNumbers
     global cursor
     cursor = 0
-    max_index = find_max(dataign, 800)
+    if d["filename"] == -1:
+        temp = pd.read_csv(d["filename"])
+        max_index = temp.iloc[:,1].values()
+    else:
+        max_index = find_max(dataign, 800)
     yNumbers = np.arange(len(dataign.iloc[:, 1]))
+    global lines
     lines = ax.plot(max_index)
     ax.imshow(dataign, cmap='plasma', vmin=-120, aspect='auto')
     ax.grid(True)
@@ -147,6 +158,40 @@ def split_file():
     print(data)
     print(len(data.iloc[:, 1]))
     print(len(data.iloc[1, :]))
+
+
+def onclick(event):
+    global ispressed, zoom_x_fra, zoom_y_fra
+    global a
+    global b
+    a, b = event.xdata, event.ydata
+    ispressed = True
+    zoom_x_fra, zoom_y_fra = event.xdata, event.ydata
+    try:
+        print('%f, %f' % (event.xdata, event.ydata))
+    except TypeError:
+        pass
+
+
+def onmove(event):
+    global ispressed, max_index
+    if ispressed:
+        try:
+            print('%f, %f' % (event.xdata, event.ydata))
+            max_index[int(event.xdata)] = int(event.ydata)
+        except TypeError:
+            pass
+
+
+def release(event):
+    global ispressed, figS, dataign, yNumbers, max_index, cursor, answer, upperlimit
+    ispressed = False
+    draws(figS, dataign, yNumbers, max_index[cursor], cursor, answer, upperlimit)
+    global lines
+    l = lines[0]
+    l.remove()
+    lines = ax.plot(max_index, c='lime', linewidth=0.5)
+    print("released")
 
 
 def export_stuff():
@@ -303,8 +348,13 @@ app = Window(root)
 
 menu_frame = Frame(app)
 menu_frame.pack(side=TOP, anchor=N)
-velMappuBtn = Button(menu_frame, text='Choose file', command=lambda: choose_file())
+d = {}
+d["filename"] = -1
+velMappuBtn = Button(menu_frame, text='Choose file', command=lambda: choose_file(d))
 velMappuBtn.pack(side=LEFT)
+
+velMaxiBtn = Button(menu_frame, text='Load maxi', command=lambda : loadmaxi(d))
+velMaxiBtn.pack(side=LEFT)
 
 Label(menu_frame, text='Cursor position: ').pack(side=LEFT)
 cLabel = Label(menu_frame, text='0')
@@ -332,7 +382,7 @@ axS.plot([1, 2, 3, 2, 6]) # Just to draw something on the screen
 global max_index
 global lines
 global filename
-filename = "/home/johannus/Documents/data/Echolodd/D20200224-T1112321.csv"
+filename = "/home/johannus/Desktop/Tilfar/Phd/SinglePing/data/D20191005-T1234012_0.csv"
 
 print("Reading data")
 
@@ -350,6 +400,7 @@ global yNumbers
 yNumbers = np.arange(10)
 
 answer = 0
+upperlimit = 2000
 max_ping_index = 0
 thisPing = (1, 2, 3)
 save_changes = False
@@ -360,14 +411,23 @@ visible_range = visible_max - visible_min
 ax.set_xlim([visible_min, visible_max])
 ax.set_xticks(np.arange(visible_min, visible_max, 100))
 okValues = []
+global ispressed
+ispressed = False
+cid = fig.canvas.mpl_connect('motion_notify_event', onmove)
+fig.canvas.mpl_connect('button_press_event', onclick)
+fig.canvas.mpl_connect('button_release_event', release)
+
+def loadmaxi(d):
+    d["filename"] = filedialog.askopenfile(title='Choose file', filetypes=(("csv file", "*.csv"), ("all files", "*.*"))).name
 
 
-def draws(figS, dataign, yNumbers, bl_index, cursor, answer):
+def draws(figS, dataign, yNumbers, bl_index, cursor, answer, upperlimit):
     figS.clf()
     axS = figS.add_subplot(111)
     axS.plot(dataign.iloc[:, cursor], yNumbers * -1)
     axS.axhline(y=-bl_index, c='k')
     axS.axhline(y=-float(answer), c='red')
+    axS.axhline(y=-float(upperlimit), c='green')
     canvasSingle.draw()
 
 
@@ -382,6 +442,8 @@ def key(event):
     global axS
     global thisPing
     global okValues
+    global upperlimit
+    global lines
     print(event.keysym)
     if event.keysym == '1':
         okValues.append(cursor)
@@ -398,21 +460,21 @@ def key(event):
         cursor = 0
     if event.keysym == 'Right':
         cursor = cursor + 1
-        draws(figS, dataign, yNumbers, max_index[cursor], cursor, answer)
+        draws(figS, dataign, yNumbers, max_index[cursor], cursor, answer, upperlimit)
     if event.keysym == 'Left':
         cursor = cursor - 1
-        draws(figS, dataign, yNumbers, max_index[cursor], cursor, answer)
+        draws(figS, dataign, yNumbers, max_index[cursor], cursor, answer, upperlimit)
     if event.keysym == 'Up':
         max_ping_index += 1
         save_changes = True
-        draws(figS, dataign, yNumbers, max_ping_index, cursor, answer)
+        draws(figS, dataign, yNumbers, max_index[cursor], cursor, answer, upperlimit)
         axS.plot(thisPing, yNumbers * -1)
         # axS.axhline(y=-max_ping_index, c='k')
         axS.axhline(y=-float(answer), c='red')
     if event.keysym == 's':
         toSave = pd.DataFrame(max_index)
         print('Saving....')
-        toSave.to_csv(filename[:-4] + 'maxi.csv')
+        toSave.to_csv(filename[:-4] + 'bottom.csv')
         print('Done!')
         bad_joke = np.floor(np.random.random() * 16)
         joke = "text"
@@ -449,6 +511,14 @@ def key(event):
         elif bad_joke == 15:
             joke = "Why is pirating so addictive? They say once ye lose yer first hand, ye get hooked!"
         messagebox.showinfo("Finished", joke)
+    if event.keysym == 'KP_Enter':
+        upperlimit = simpledialog.askstring("Input", "Net is under?", parent=app)
+        visible_max = cursor + 500
+        max_index[cursor:visible_max] = find_max(dataign.iloc[:, cursor:visible_max], float(answer), upperlimit=float(upperlimit))
+        l = lines[0]
+        l.remove()
+        lines = ax.plot(max_index, c='lime', linewidth=0.5)
+
     if event.keysym == 'KP_Decimal' or event.keysym == 'comma':
         answer = simpledialog.askstring("Input", "Surface is above?", parent=app)
         visible_max = cursor + 500
@@ -481,7 +551,7 @@ def key(event):
         scatters.remove()
         scatters = ax.scatter(cursor, 100, c='white')
 
-        draws(figS, dataign, yNumbers, max_index[cursor], cursor, answer)
+        draws(figS, dataign, yNumbers, max_index[cursor], cursor, answer, upperlimit)
 
         visible_min = cursor - 20
         if visible_min < 0:
@@ -513,7 +583,7 @@ def key(event):
             max_ping_index = 0
             max_value = -5000
             for i, amp in enumerate(thisPing):
-                if amp > max_value and (i < float(answer)):
+                if amp > max_value and (float(upperlimit) < i < float(answer)):
                     max_value = amp
                     max_ping_index = i
             axS.axhline(y=-max_ping_index, c='k', linewidth=1)
