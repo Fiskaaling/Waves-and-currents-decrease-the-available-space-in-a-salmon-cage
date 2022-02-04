@@ -57,7 +57,7 @@ levels(effortsent$against)<-c("Against current","Free swimming")
 
 # For other video observations
 behaviours2<-read_csv2("behaviours2.csv")
-behaviours2$datetime<-as.POSIXct(paste(behaviours$date,behaviours$time), format="%d.%m.%Y %H:%M:%S")
+behaviours2$datetime<-as.POSIXct(paste(behaviours2$date,behaviours2$time), format="%d.%m.%Y %H:%M:%S")
 behaviours2<-behaviours2 %>% 
   mutate(thirtymin=round_date(datetime, "30 minutes"))
 

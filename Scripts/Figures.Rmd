@@ -23,58 +23,70 @@ library(scales)
 
 The data used to create the figures
 ```{r, message=FALSE}
-#Figure 2: Current and wave directions from two current profilers; Figure 3: Wave height measured by two current profilers
-sentstreym<-read_csv("sentvfivemins.csv")
+#Figure 3: Current and wave directions from two current profilers; Figure 3: Wave height measured by two current profilers
+sentstreym<-read_csv("sentinelv2.csv")
 awacstreym<-read_csv("awaccurrent.csv")
 awacalda<-read_csv("awacwaves.csv")
 sentalda<-read_csv("sentwaves.csv")
 
-#Figure 4: Depth measured by pressure sensors
+#Figure 5: Depth measured by pressure sensors
 deform<-read_csv("depths.csv")
 colnames(deform)<- c("time","temp","Side west","Side north","Side south","Bottom west","Side east","Bottom east", "Bottom south","Bottom north")
 deformlong<-pivot_longer(deform, cols= -c("time","temp"), names_to = "location", values_to = "depth")
-sentsmall<-sentstreym[c(1,5,11,32,33)]
-currentlong<-merge(deformlong,sentsmall, by.x = "time", by.y = "fivemin")
+sentsmall<-sentstreym[c(1,34,35,64,65)]
+currentlong<-merge(deformlong,sentsmall, by.x = "time", by.y = "datetime")
 
 currentlong<-currentlong %>% 
   mutate(direction=factor(ifelse(meandir<240 & meandir>90, "Southbound","Northbound"))) 
 
 currentlong$location<-factor(currentlong$location, levels=c("Side west","Side south","Side east","Side north","Bottom west","Bottom south","Bottom east","Bottom north"))
 
-#Figure 5: Proportion of time spent swimming in place against the current
+#Figure 6: Proportion of time spent swimming in place against the current
 southanalysis<-read_csv("nusentanalysis.csv")
 
 sentshort<-sentsmall %>% 
-  mutate(thirtymin=round_date(fivemin, "30 minutes")) %>% 
+  mutate(thirtymin=round_date(datetime, "30 minutes")) %>% 
   group_by(thirtymin) %>% 
-  summarise(meanmag=mean(meanmag),meandir=mean(circular(meandir,units="degrees"))%%360, mag4=mean(mag4),dir4=mean(circular(dir4,units="degrees"))%%360)
+  summarise(meanmag=mean(meanmag),meandir=mean(circular(meandir,units="degrees"))%%360)
 
 behaviours2<-read_csv2("behaviours2.csv")
 behaviours2$datetime<-as.POSIXct(paste(behaviours2$date,behaviours2$time), format="%d.%m.%Y %H:%M:%S")
 
 behavioursent<-behaviours2 %>% 
-  mutate(thirtymin=round_date(datetime, "30 minutes")) %>% 
-  left_join(sentshort, by=c("thirtymin"="thirtymin")) %>% 
   mutate(datetime=round_date(datetime,"5 minutes")) %>% 
+  left_join(sentsmall, by=c("datetime"="datetime")) %>% 
   left_join(southanalysis, by=c("datetime"="datetime")) %>% 
-  mutate(hourly=round_date(thirtymin, "hour")) %>% 
+  mutate(hourly=round_date(datetime, "hour")) %>% 
   left_join(awacalda, by=c("hourly"="hourly")) %>% 
   mutate(nonsome=none+some) %>% 
   mutate(somemany=some+many) %>% 
   mutate(manyshoal=many+shoal) %>% 
   mutate(any=somemany+shoal) %>% 
+  mutate(total=none+some+many+shoal) %>%
+  mutate(notmany=none+some+shoal) %>% 
+  mutate(meanmag1=ifelse(is.na(meanmag),speedmean*1.5, meanmag)) %>% 
+  mutate(meandir1=ifelse(is.na(meandir),dirmean, meandir)) %>% 
   mutate(direction=ifelse(meandir<250 & meandir>70,"Southbound","Northbound")) %>% 
+  mutate(direction1=ifelse(meandir1<250 & meandir1>70,"Southbound","Northbound")) %>% 
   mutate(direction2=ifelse(dirmean<250 & dirmean>70,"Southbound","Northbound")) %>% 
-  mutate(height=cut(Hm0,breaks=c(-Inf,1.2,Inf),labels=c("Small","Large"))) %>% 
-  mutate(length=cut(Tp, breaks=c(-Inf,12,Inf),labels=c("Short","Long"))) %>% 
-  mutate(streym=cut(speedmean, breaks=c(-Inf,0.1,0.2,Inf),labels=c("Weak","Medium","Strong"))) %>% 
+  mutate(height=cut(Hm0,breaks=c(-Inf,1.4,Inf),labels=c("Small","Large"))) %>% 
+  mutate(length=cut(Tp, breaks=c(-Inf,13,Inf),labels=c("Short","Long"))) %>% 
+  mutate(streym=cut(meanmag1, breaks=c(-Inf,0.2,Inf),labels=c("Weak","Strong"))) %>% 
   mutate(biagainst=ifelse(against/(301-none)>0.5,1,0)) %>% 
-  mutate(bimany=ifelse(manyshoal>150,1,0)) 
+  mutate(bimany=ifelse(manyshoal>150,1,0)) %>% 
+  mutate(biany=ifelse(any>150,1,0)) %>% 
+  mutate(wave=Hm0*Tp) %>% 
+  mutate(noneprop=none/total) %>% 
+  mutate(someprop=some/total) %>% 
+  mutate(manyprop=many/total) %>% 
+  mutate(shoalprop=shoal/total) %>% 
+  mutate(nonesprop=nonsome/total) %>% 
+  mutate(anyprop=any/total) 
 
 levels(behavioursent$biagainst)<-c("Against current","Free swimming")
 
 
-#Figure 6: Swimming effort measured in tail beats per second (tbps) over current
+#Figure 7: Swimming effort measured in tail beats per second (tbps) over current
 effort<-read_csv2("effort.csv")
 effort$datetime<-as.POSIXct(effort$datetime, format = "%d.%m.%Y %H:%M")
 effort$date<-as.Date(effort$datetime)
@@ -98,7 +110,19 @@ effortsent<-effort %>%
 
 levels(effortsent$against)<-c("Against current","Free swimming")
 
-#Figure 7: Depth and dispersal of fish over hour in the day when current is weak.
+#Figure 9: 
+
+collisiondat<-behavioursent %>% 
+  mutate(netvis=ifelse(collision>0, "ja", netvis)) %>% 
+  filter(netvis=="ja") %>% 
+  filter(none < 300)%>% 
+  mutate(nucols=collision/any) %>% 
+  mutate(nucols2=collision/some)
+
+collisiondat$nucols<-round(collisiondat$nucols,2)*300
+collisiondat$nucols2<-round(collisiondat$nucols2,2)*300
+
+#Figure 10: Depth and dispersal of fish over hour in the day when current is weak.
 
 ekkoS<-read_csv("T1clean.csv")
 ekkoN<-read_csv("T2clean.csv")
@@ -124,7 +148,7 @@ SEsouth<-ekkoS %>%
   mutate(daynight=factor(ifelse(hour<15 & hour>8, "Day","Night")))
 
 
-#Figure 9
+#Figure 11
 ekkowsouth<-SEsouth %>% 
   left_join(awacalda, by=c("hourly"="hourly")) %>% 
   mutate(height=cut(Hm0,breaks=c(-Inf,1,Inf),labels=c("Small","Large"))) %>% 
@@ -134,7 +158,7 @@ ekkownorth<-NEsouth %>%
   mutate(height=cut(Hm0,breaks=c(-Inf,1,Inf),labels=c("Small","Large"))) %>% 
   mutate(length=cut(Tp, breaks=c(-Inf,12,Inf),labels=c("Short","Long"))) 
 
-#Figure 10
+#Figure 12
 welfare<-read_xlsx("Heilsukanningar.xlsx")
 welfare<-welfare %>% 
   mutate(fins=as.ordered(fins)) %>% 
@@ -159,6 +183,7 @@ sentvcurrentrose<-plot.windrose2(spd=sentstreym$meanmag, dir=sentstreym$meandir,
 awacwaverose<-plot.windrose2(spd=awacalda$Hm0, dir=awacalda$DirTp,spdmin=0,spdmax=3.5,spdres=0.5)+theme(legend.position="none", axis.title.y = element_blank())+labs(title="AWAC Waves")
 sentvwaverose<-plot.windrose2(spd=sentalda$Hs, dir=sentalda$Dp,spdmin=0,spdmax=3.5,spdres=0.5, legend="Wave height (m)")+labs(title="Sentinel V Waves")+theme(axis.title.y = element_blank(), plot.margin = margin(5,30,5,5,"pt"))
 plot_grid(awaccurrentrose,sentvcurrentrose,awacwaverose,sentvwaverose,ncol=2, rel_heights = c(1,1), rel_widths= c(2,3))
+#ggsave("windroses.pdf")
 ```
 Figure 4: Wave height measured by two current profilers.
 
@@ -186,12 +211,14 @@ awacwave<-ggplot(awacalda, aes(x=datetime, y=Hm0, color = "Hs"))+
    theme(legend.position = "none")+
   scale_color_discrete_sequential(palette = "Magenta", l1=40, l2 = 80, c1=50,c2=50)
 
-plot_grid(sentwave,awacwave,ncol=1)
+plot_grid(sentwave,awacwave,ncol=1,rel_heights = c(1,1.3))
+
+ggsave("waves.eps")
 ```
 
 Figure 5: Depth measured by pressure sensors.
 
-```{r,fig.width=7,fig.height=3}
+```{r,fig.width=7.5,fig.height=3}
 ggplot(currentlong, aes(y = depth, x =meanmag, col=direction))+
   geom_point(alpha=1/70)+
   geom_smooth(method="lm", se=F)+
@@ -199,7 +226,9 @@ ggplot(currentlong, aes(y = depth, x =meanmag, col=direction))+
   labs(x= "Current speed (m/s)", y="Depth (m)", col="Current Direction")+
   ylim(-20,0)+
   scale_color_discrete_sequential(palette="Magenta", l1=40, l2 = 80, c1=50,c2=50)+
-  theme_classic()
+  theme_classic()+
+  theme(panel.spacing.x = unit(4, "mm"))
+ggsave("depths.tiff", dpi=300)
 ```
 
 Figure 6: Proportion of time spent swimming in place against the current
@@ -215,6 +244,7 @@ ggplot(baforplot2, aes(x=speedmean, y=biagainst, colour=direction2))+
   scale_color_discrete_sequential(palette="Magenta", l1=40, l2 = 80, c1=50,c2=50)+
   labs(x="Current speed (m/s)", y="Proportion swimming against current", color="Current direction")+
   theme_classic()
+ggsave("against.eps")
 ```
 
 Figure 7: swimming effort
@@ -235,9 +265,53 @@ ggplot(fit, aes(x=speedmean,y=fit, col=length))+
   ylim(0,2)+
   facet_grid(.~direction2)+
   theme_classic()
+ggsave("effort.eps")
 ```
 
-Figure 8: depth and dispersal of fish over hour in the day when the current is weak
+Figure 8: Proportion of time per video where "Many" (top panel) or "Any" (bottom panel) salmon were recorded
+```{r,fig.width=7,fig.height=3}
+manyboxplot<-ggplot(behavioursent, aes(x=camera, y=manyprop, color=height, fill=height))+
+  geom_boxplot(outlier.shape=NA,alpha=0.4)+
+  geom_point(position=position_jitterdodge())+
+  scale_color_discrete_sequential(palette="Magenta", l1=40, l2 = 80, c1=50,c2=50)+
+  scale_fill_discrete_sequential(palette="Magenta", l1=40, l2 = 80, c1=50,c2=50)+
+  labs(x="Camera location",y="Proportion", col="Wave height", fill="Wave height")+
+ # facet_wrap(.~streym)+
+  theme_classic()
+anyboxplot<-ggplot(behavioursent,aes(x=camera,y=anyprop,color=height, fill=height))+
+  geom_boxplot(outlier.shape=NA,alpha=0.4)+
+  geom_point(position=position_jitterdodge())+
+  scale_color_discrete_sequential(palette="Magenta", l1=40, l2 = 80, c1=50,c2=50)+
+  scale_fill_discrete_sequential(palette="Magenta", l1=40, l2 = 80, c1=50,c2=50)+
+  labs(x="Camera location",y="Proportion", col="Wave height", fill="Wave height")+
+#  facet_wrap(.~streym)+
+  theme_classic()
+
+grid.arrange(manyboxplot,anyboxplot)
+horizontal<-arrangeGrob(manyboxplot,anyboxplot)
+ggsave("horizontal.tiff",horizontal, dpi=300, height=3, width=7)
+```
+
+Figure 9: Number of net collisions per 300 seconds over wave height split by current speed
+
+```{r,fig.width=7,fig.height=3}
+ggplot(collisiondat, aes(x=Hm0,y=nucols, col=streym))+
+  geom_point()+
+  geom_smooth(method = "glm", 
+        method.args = list(family = "poisson"), aes(fill=streym))+
+  scale_color_discrete_sequential(palette="Magenta", l1=40, l2 = 80, c1=50,c2=50)+
+  scale_fill_discrete_sequential(palette="Magenta", l1=40, l2 = 80, c1=50,c2=50)+
+    labs(x="Wave height (m)", y="Collisions per 300 seconds",col="Current speed",fill="Current speed")+
+  #facet_wrap(.~direction)+
+  theme_classic()
+
+ggsave("collisions.tiff", dpi=300)
+```
+
+
+
+
+Figure 10: depth and dispersal of fish over hour in the day when the current is weak
 
 ```{r, fig.width=7, fig.height=3}
 SEsouth %>%
@@ -250,9 +324,10 @@ SEsouth %>%
   scale_fill_gradientn(limits = c(-100,-70),
   colours=c("black", "darkmagenta", "lightpink", "white"))+
   theme_classic()
+ggsave("hourdepth.eps")
 
 ```
-Figure 9: depth and dispersal of fish over current
+Figure 11: depth and dispersal of fish over current
 
 ```{r, fig.width=7, fig.height=4}
 allplots<-SEsouth %>%
@@ -284,9 +359,11 @@ allplotn<-NEsouth %>%
   theme_classic()
 
 grid.arrange(allplots,allplotn)
+
+ggsave("currentdepth.eps")
 ```
 
-Figure 10: Depth and dispersal of fish over wave height (Hm0) in weak current
+Figure 12: Depth and dispersal of fish over wave height (Hm0) in weak current
 ```{r, fig.width=7, fig.height=2}
 wavesouth<-ekkowsouth %>%
   filter(daynight=="Night") %>% 
@@ -321,9 +398,11 @@ wavenorth<-ekkownorth %>%
   theme_classic()
 
 grid.arrange(wavesouth,wavenorth,ncol=2)
+
+ggsave("wavedepth.eps")
 ```
 
-Figure 11: Distribution of welfare scores over time
+Figure 13: Distribution of welfare scores over time
 ```{r, fig.width=7, fig.height=3}
 welfare %>% 
   filter(!(injuries %in% NA)) %>% 
@@ -336,5 +415,6 @@ welfare %>%
   scale_x_datetime(breaks="2 months", labels = date_format("%m-%Y"))+
   theme_classic()+
   theme(axis.text.x=element_text(angle=45, vjust=1,hjust=1), panel.grid.major.y = element_line(color="grey80", linetype = 2))
+ggsave("welfarescores.eps")
 ```
 
